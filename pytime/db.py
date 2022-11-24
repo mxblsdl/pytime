@@ -66,4 +66,4 @@ def add_project(proj: str = None):
 
 # init_db(clean=True)
 
-add_project("test2")
+# add_project("test4")
