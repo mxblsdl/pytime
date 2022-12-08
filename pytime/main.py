@@ -14,7 +14,9 @@ app = typer.Typer(no_args_is_help=True)
 
 
 """
+Time tracking with the CLI
 
+Uses a sqlite db to store entries
 """
 
 
@@ -23,13 +25,6 @@ def check_db_path():
     if not db_path.exists():
         raise Exception("DB does not exist! Run `pytime init` to resolve")
     return db_path
-
-
-@app.callback()
-def callback():
-    """
-    Time tracker app
-    """
 
 
 @app.command("init")
@@ -79,7 +74,16 @@ def db_init(clean: bool = typer.Option(False, "--clean", "-c", is_flag=True)):
 
 
 @app.command("add")
-def add_project(proj: str = None):
+def add_project(
+    proj: str = typer.Argument(..., help="Name of project to log time under")
+):
+    """_summary_
+
+    Args:
+        proj (str, optional): _description_. Defaults to typer.Argument(default=None, help="Name of project to log time under").
+    """
+    proj = proj.upper()
+
     db_path = check_db_path()
     con = sqlite3.connect(db_path)
 
@@ -88,8 +92,8 @@ def add_project(proj: str = None):
     # Check for existing project
     cursor.execute("select project from Projects")
     projects = cursor.fetchall()
-    b = proj in [p[0] for p in projects]
-    if b:
+    check = proj in [p[0] for p in projects]
+    if check:
         print(f"Project {proj} already exists in DB! No action taken")
         return
 
@@ -112,6 +116,8 @@ def log_time(
         proj (str, optional): Project name, entered from prompt
         time (float, optional): Time value in hours, entered from prompt
     """
+    proj = proj.upper()
+
     db_path = check_db_path()
 
     con = sqlite3.connect(db_path)
@@ -152,28 +158,12 @@ def log_time(
     con.close()
 
 
-# log_time("2022-11-23", "new_proj", 3.14)
-# db_init(clean=True)
-# app.init(clean=True)
-
-# Create toy data
-# add_project("amex")
-# log_time("amex", 1.0, "2022-11-21")
-# log_time("amex", 4.0, "2022-11-21")
-# log_time("amex", 6.0, "2022-11-22")
-# log_time("amex", 3.0, "2022-11-08")
-# log_time("amex", 4.0, "2022-11-09")
-
-
 def print_week(day: str) -> None:
     dt = datetime.strptime(day, "%Y-%m-%d")
     start = dt - timedelta(days=dt.weekday())
     end = start + timedelta(days=6)
     print(f"Monday {start.strftime('%Y-%m-%d')}")
     print(f"Sunday {end.strftime('%Y-%m-%d')}")
-
-
-# Testing out creating a table report in console
 
 
 @app.command("report")
@@ -251,4 +241,45 @@ def get_start_end_date(weeks_back):
     return start, end
 
 
-# time_report(weeks_back=1)
+@app.command("show")
+def show_projects(
+    total: bool = typer.Option(
+        False, "--total", "-t", is_flag=True, help="Summarize hours by projects"
+    )
+):
+    """Show Projects
+
+    List out all project names.
+    total: Optional argument to show total time for each project
+    """
+    db_path = check_db_path()
+    con = sqlite3.connect(db_path)
+
+    cursor = con.cursor()
+    if total:
+        sql = """SELECT project, SUM(time)
+            FROM Time
+            JOIN Projects
+            ON Time.project_id = Projects.id
+            GROUP BY project"""
+    else:
+        sql = "SELECT project FROM Projects"
+
+    # Check for existing project
+    cursor.execute(sql)
+    projects = cursor.fetchall()
+
+    table = Table(show_header=True, header_style="bold green")
+    table.box = box.SIMPLE
+    table.add_column("Projects")
+
+    if total:
+        table.add_column("Total Time")
+        for project in projects:
+            table.add_row(project[0], str(project[1]))
+    else:
+        for project in projects:
+            table.add_row(project[0])
+
+    console = Console()
+    console.print(table)
