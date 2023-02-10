@@ -1,16 +1,17 @@
 [tool.poetry]
 name = "pytime"
-version = "0.1.1"
+version = "0.2.1"
 description = ""
 authors = ["mxblsdl <maxblasdel@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.scripts]
-pytime="pytime.main:app"
+pytime="pytime.clock:app"
 
 [tool.poetry.dependencies]
 python = "^3.10"
 typer = {extras = ["all"], version = "^0.7.0"}
+clockify-api-client = "^0.1.0"
 
 
 

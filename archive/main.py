@@ -27,6 +27,28 @@ def check_db_path():
     return db_path
 
 
+def create_table(start, total_hours):
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Date", style="dim")
+    table.add_column(
+        "Project", Text.from_markup("Total", justify="right"), style="green"
+    )
+    table.add_column("Time", footer=str(total_hours), justify="right")
+    table.title = f"Week Starting {start.strftime('%Y-%m-%d')}"
+    table.caption = "Made with :snake:"
+    table.show_footer = True
+    table.box = box.SIMPLE
+    return table
+
+
+def get_start_end_date(weeks_back):
+    dt = datetime.date(datetime.today())
+    start = dt - timedelta(days=dt.weekday()) - timedelta(weeks=weeks_back)
+    end = start + timedelta(days=6)
+    return start, end
+
+# print(get_start_end_date(weeks_back=0))
+
 @app.command("init")
 def db_init(clean: bool = typer.Option(False, "--clean", "-c", is_flag=True)):
     """
@@ -77,7 +99,7 @@ def db_init(clean: bool = typer.Option(False, "--clean", "-c", is_flag=True)):
 def add_project(
     proj: str = typer.Argument(..., help="Name of project to log time under")
 ):
-    """_summary_
+    """Add a project to the database
 
     Args:
         proj (str, optional): _description_. Defaults to typer.Argument(default=None, help="Name of project to log time under").
@@ -217,28 +239,6 @@ def time_report(
             table.add_section()
 
     console.print(table)
-
-
-def create_table(start, total_hours):
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("Date", style="dim")
-    table.add_column(
-        "Project", Text.from_markup("Total", justify="right"), style="green"
-    )
-    table.add_column("Time", footer=str(total_hours), justify="right")
-    table.title = f"Week Starting {start.strftime('%Y-%m-%d')}"
-    table.caption = "Made with :snake:"
-    table.show_footer = True
-    table.box = box.SIMPLE
-    return table
-
-
-def get_start_end_date(weeks_back):
-    dt = datetime.strftime(datetime.today(), "%Y-%m-%d")
-    dt = datetime.strptime(dt, "%Y-%m-%d")
-    start = dt - timedelta(days=dt.weekday()) - timedelta(weeks=weeks_back)
-    end = start + timedelta(days=6)
-    return start, end
 
 
 @app.command("show")
