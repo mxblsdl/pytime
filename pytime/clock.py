@@ -137,6 +137,7 @@ def get_project_durations(
                 )
 
             print(table)
+            return
 
     if weekly:
         out = out.sort("date")
@@ -183,7 +184,7 @@ def create_cols(df: pl.DataFrame, proj: str = ""):
     df = df.with_columns((pl.col("duration") / 3600))
 
     # Add a less specific date for the table
-    df = df.with_columns(pl.col("start").cast(pl.Date).alias("date"))
+    df = df.with_columns(pl.col("start").dt.truncate("1d").alias("date").cast(pl.Date))
 
     # conditionally add proj name
     if proj != "":
@@ -213,6 +214,3 @@ def create_table(start, end, total_hours):
     table.show_footer = True
     table.box = box.SIMPLE
     return table
-
-
-get_project_durations(weeks_back=1, weekly=True)
