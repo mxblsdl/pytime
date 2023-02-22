@@ -2,12 +2,11 @@ import typer
 
 from clockify_api_client.client import ClockifyAPIClient
 from datetime import datetime, timedelta
-from dateutil import tz
-import pandas as pd
 from pathlib import Path
 from rich.table import Table
 from rich.text import Text
 from rich import box, print
+import polars as pl
 
 
 app = typer.Typer(
@@ -94,7 +93,7 @@ def get_project_durations(
 
     # Get all time entries
     # Params passed as dictionary items that filter results
-    out = pd.DataFrame()
+    out = pl.DataFrame()
 
     for proj in projs:
         dt = datetime.today()
@@ -116,75 +115,79 @@ def get_project_durations(
 
         # Parse results by project
         e = [e["timeInterval"] for e in entries]
-        df = pd.DataFrame(e)
+        df = pl.DataFrame(e)
 
-        if not df.empty:
+        if not df.is_empty():
             df = create_cols(df, proj)
 
             # Here I would groupby and summarize the duration
             # Then append this project with the output
             if weekly:
-                df = df.groupby(["name", "date"]).agg({"duration": "sum"}).reset_index()
-                out = pd.concat([out, df])
+                df = df.groupby(["name", "date"]).agg(pl.col("duration").sum().round(2))
+                out = pl.concat([out, df])
                 continue
 
             table = create_table(
                 start, end, total_hours=round(df["duration"].sum(), ndigits=2)
             )
 
-            for row in df.itertuples():
-                table.add_row(row.date, row.name, str(row.duration))
+            for row in df.iter_rows(named=True):
+                table.add_row(
+                    str(row["date"]), row["name"], str(round(row["duration"], 2))
+                )
 
             print(table)
 
     if weekly:
-        out = out.sort_values("date").reset_index()
-        out["duration"] = round(out["duration"], 2)
+        out = out.sort("date")
+        out = out.with_columns(pl.col("duration").round(2))
 
         table = create_table(
             start, end, total_hours=round(out["duration"].sum(), ndigits=2)
         )
-        for ind in out.index:
+
+        for idx, ind in enumerate(out.iter_rows(named=True)):
             table.add_row(
-                out.loc[ind]["date"],
-                out.loc[ind]["name"],
-                str(out.loc[ind]["duration"]),
+                str(ind["date"]),
+                ind["name"],
+                str(ind["duration"]),
             )
 
-            try:
-                out.loc[ind + 1]
-            except:
-                subtotal(out, table, ind)
+            if out[idx + 1].is_empty():
+                subtotal(out, table, idx)
                 table.add_section()
                 break
 
-            if out.loc[ind]["date"] != out.loc[ind + 1]["date"]:
-                subtotal(out, table, ind)
+            if out["date"][idx] != out["date"][idx + 1]:
+                subtotal(out, table, idx)
                 table.add_section()
         print(table)
 
 
-def subtotal(out, table, ind):
-    day_total = out[out["date"] == out.loc[ind]["date"]]
+def subtotal(out, table, idx):
+    day_total = out.filter(pl.col("date") == out["date"][idx])
     table.add_row("", "Subtotal", str(round(day_total["duration"].sum(), 2)))
 
 
-def create_cols(df: pd.DataFrame, proj: str = ""):
-    df["start"] = pd.to_datetime(df["start"], format="%Y-%m-%dT%H:%M:%SZ", utc=True)
-    df["end"] = pd.to_datetime(df["end"], format="%Y-%m-%dT%H:%M:%SZ", utc=True)
+def create_cols(df: pl.DataFrame, proj: str = ""):
+    df = df.with_columns(
+        pl.col("start", "end")
+        .str.strptime(pl.Datetime, fmt="%Y-%m-%dT%H:%M:%SZ")
+        .dt.replace_time_zone("UTC")
+        .dt.convert_time_zone("America/Los_Angeles")
+    )
 
-    # Convert to local time
-    df["start"] = df["start"].dt.tz_convert(tz.tzlocal())
-    df["end"] = df["end"].dt.tz_convert(tz.tzlocal())
+    df = df.with_columns(
+        (pl.col("end") - pl.col("start")).dt.seconds().alias("duration")
+    )
+    df = df.with_columns((pl.col("duration") / 3600))
 
-    diff = df["end"] - df["start"]
-    df["duration"] = round(diff.dt.total_seconds() / 3600, 2)
     # Add a less specific date for the table
-    df["date"] = df["start"].dt.strftime("%Y-%m-%d")
+    df = df.with_columns(pl.col("start").cast(pl.Date).alias("date"))
 
     # conditionally add proj name
     if proj != "":
-        df["name"] = proj["name"]
+        df = df.with_columns(pl.lit(proj["name"]).alias("name"))
 
     return df
 
@@ -210,3 +213,6 @@ def create_table(start, end, total_hours):
     table.show_footer = True
     table.box = box.SIMPLE
     return table
+
+
+get_project_durations(weeks_back=1, weekly=True)

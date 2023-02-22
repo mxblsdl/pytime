@@ -12,6 +12,7 @@ pytime="pytime.clock:app"
 python = "^3.10"
 typer = {extras = ["all"], version = "^0.7.0"}
 clockify-api-client = "^0.1.0"
+polars = "^0.16.7"
 
 
 
