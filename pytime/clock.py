@@ -51,19 +51,18 @@ def api_prompt(API_URL: str = "api.clockify.me/v1"):
         while res.lower() not in ["y", "n"]:
             res = typer.prompt("Please enter either 'y' or 'n'")
 
-        if res.lower() == "n":
-            return client
-        else:
+        if res.lower() == "y":
             config_file.touch()
             config_file.write_text(f"""API_KEY={api}""")
             return client
+
+        return client
     else:
         print("Using stored API Credentials")
         api_text = config_file.read_text()
         api_text = api_text.split("=")
-        api = api_text[1]
         try:
-            client = ClockifyAPIClient().build(api, API_URL)
+            client = ClockifyAPIClient().build(api_text[1], API_URL)
         except:
             print("Problem with API key\nMake sure your key was entered correctly")
             raise typer.Abort()
@@ -87,20 +86,16 @@ def get_project_durations(
     # This assumes there is only one workspace for the user
     workspace_id, user_id = get_ids(client)
     projs = client.projects.get_projects(workspace_id)
-
-    # get all projects
-    projs = client.projects.get_projects(workspace_id)
-
     # Get all time entries
     # Params passed as dictionary items that filter results
     out = pl.DataFrame()
 
-    for proj in projs:
-        dt = datetime.today()
-        start = dt - timedelta(days=dt.weekday()) - timedelta(weeks=weeks_back)
-        start = start.replace(hour=0)  # set to beginning of day
-        end = start + timedelta(days=6)
+    dt = datetime.today()
+    start = dt - timedelta(days=dt.weekday()) - timedelta(weeks=weeks_back)
+    start = start.replace(hour=0)  # set to beginning of day
+    end = start + timedelta(days=6)
 
+    for proj in projs:
         # Make API call from start date
         entries = client.time_entries.get_time_entries(
             workspace_id,
@@ -112,32 +107,27 @@ def get_project_durations(
                 "end": end.isoformat() + "Z",
             },
         )
+        if not entries:
+            continue
 
         # Parse results by project
         e = [e["timeInterval"] for e in entries]
         df = pl.DataFrame(e)
+        df = create_cols(df, proj)
 
-        if not df.is_empty():
-            df = create_cols(df, proj)
+        # short circuit the for loop with agg data
+        if weekly:
+            df = df.groupby(["name", "date"]).agg(pl.col("duration").sum().round(2))
+            out = pl.concat([out, df])
+            continue
 
-            # Here I would groupby and summarize the duration
-            # Then append this project with the output
-            if weekly:
-                df = df.groupby(["name", "date"]).agg(pl.col("duration").sum().round(2))
-                out = pl.concat([out, df])
-                continue
+        table = create_table(
+            start, end, total_hours=round(df["duration"].sum(), ndigits=2)
+        )
+        for row in df.iter_rows(named=True):
+            table.add_row(str(row["date"]), row["name"], str(round(row["duration"], 2)))
 
-            table = create_table(
-                start, end, total_hours=round(df["duration"].sum(), ndigits=2)
-            )
-
-            for row in df.iter_rows(named=True):
-                table.add_row(
-                    str(row["date"]), row["name"], str(round(row["duration"], 2))
-                )
-
-            print(table)
-            return
+        print(table)
 
     if weekly:
         out = out.sort("date")
@@ -154,42 +144,36 @@ def get_project_durations(
                 str(ind["duration"]),
             )
 
+            # End table creation with final break
             if out[idx + 1].is_empty():
                 subtotal(out, table, idx)
-                table.add_section()
                 break
 
+            # Add break between dates
             if out["date"][idx] != out["date"][idx + 1]:
                 subtotal(out, table, idx)
-                table.add_section()
         print(table)
 
 
 def subtotal(out, table, idx):
     day_total = out.filter(pl.col("date") == out["date"][idx])
     table.add_row("", "Subtotal", str(round(day_total["duration"].sum(), 2)))
+    table.add_section()
 
 
 def create_cols(df: pl.DataFrame, proj: str = ""):
-    df = df.with_columns(
-        pl.col("start", "end")
-        .str.strptime(pl.Datetime, fmt="%Y-%m-%dT%H:%M:%SZ")
-        .dt.replace_time_zone("UTC")
-        .dt.convert_time_zone("America/Los_Angeles")
+    df = (
+        df.with_columns(
+            pl.col("start", "end")
+            .str.strptime(pl.Datetime, fmt="%Y-%m-%dT%H:%M:%SZ")
+            .dt.replace_time_zone("UTC")
+            .dt.convert_time_zone("America/Los_Angeles")
+        )
+        .with_columns((pl.col("end") - pl.col("start")).dt.seconds().alias("duration"))
+        .with_columns((pl.col("duration") / 3600))
+        .with_columns(pl.col("start").dt.truncate("1d").alias("date").cast(pl.Date))
+        .with_columns(pl.lit(proj["name"]).alias("name"))
     )
-
-    df = df.with_columns(
-        (pl.col("end") - pl.col("start")).dt.seconds().alias("duration")
-    )
-    df = df.with_columns((pl.col("duration") / 3600))
-
-    # Add a less specific date for the table
-    df = df.with_columns(pl.col("start").dt.truncate("1d").alias("date").cast(pl.Date))
-
-    # conditionally add proj name
-    if proj != "":
-        df = df.with_columns(pl.lit(proj["name"]).alias("name"))
-
     return df
 
 
